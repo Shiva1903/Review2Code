@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="navbar">
+  <a href="/" class="brand">QRLock</a>
+  <div class="nav-links">
+    <a href="/dashboard">Dashboard</a>
+    <a href="/logout">Logout</a>
+  </div>
+</div>
+
+<div class="container">
+  <h1>Decrypt File</h1>
+  <form method="POST" action="/decrypt" enctype="multipart/form-data">
+    <label>QR Code:</label>
+    <input type="file" name="json_file" required>
+    <button type="submit">Upload & Decrypt</button>
+  </form>
+</div>
+
+</body>
+</html>

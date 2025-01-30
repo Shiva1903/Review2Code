@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<div class="navbar">
+  <a href="/" class="brand">QRLock</a>
+  <div class="nav-links">
+    <a href="/dashboard">Dashboard</a>
+    <a href="/logout">Logout</a>
+  </div>
+</div>
+
+<div class="container">
+  <h1>Encrypt File</h1>
+  <form method="POST" action="/encrypt" enctype="multipart/form-data">
+    <label>File to Encrypt:</label>
+    <input type="file" name="file_to_encrypt" required>
+
+    <label>6-Digit User IDs (comma-separated):</label>
+    <input type="text" name="six_digit_ids" placeholder="123456, 654321" required>
+
+    <label>Threshold (K):</label>
+    <input type="number" name="threshold" min="1" value="2">
+
+    <button type="submit">Encrypt & Download QR Code</button>
+  </form>
+</div>
+
+</body>
+</html>
