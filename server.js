@@ -225,7 +225,13 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
     if (!req.file) {
       return res.send("No file. <a href='/encrypt'>Back</a>");
     }
+    
     const fileData = fs.readFileSync(req.file.path);
+    const originalFileSize = req.file.size;
+
+    const aesKey = forge.random.getBytesSync(32); 
+    const { ciphertext, iv, tag } = aesEncrypt(fileData, Buffer.from(aesKey, 'binary'));
+    const aesKeyHex = Buffer.from(aesKey, 'binary').toString('hex');
 
     const userIdsStr = req.body.six_digit_ids || "";
     const thresholdStr = req.body.threshold || "2";
@@ -243,9 +249,6 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
       return res.send("Some 6-digit IDs not found in DB. <a href='/encrypt'>Back</a>");
     }
 
-    const aesKey = forge.random.getBytesSync(32); 
-    const { ciphertext, iv, tag } = aesEncrypt(fileData, Buffer.from(aesKey, 'binary'));
-    const aesKeyHex = Buffer.from(aesKey, 'binary').toString('hex');
     const totalUsers = userIds.length;
     const shares = secrets.share(aesKeyHex, totalUsers, threshold);
     const encryptedShares = [];
@@ -263,6 +266,7 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
         encrypted_share: encShareBuf.toString('base64')
       });
     }
+
     const payload = {
       filename: req.file.originalname,
       iv: iv.toString('base64'),
@@ -271,8 +275,17 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
       encrypted_shares: encryptedShares,
       threshold
     };
+
+    const payloadStr = JSON.stringify(payload, null, 2);
+    const payloadSize = Buffer.byteLength(payloadStr, 'utf8');
+    const overheadRatio = ((payloadSize - originalFileSize) / originalFileSize) * 100;
+
+    console.log(`Original File Size: ${originalFileSize} bytes`);
+    console.log(`Payload Size: ${payloadSize} bytes`);
+    console.log(`Overhead Ratio: ${overheadRatio.toFixed(2)}%`);
+
     const outFile = path.join(__dirname, 'uploads', 'encrypted_data.json');
-    fs.writeFileSync(outFile, JSON.stringify(payload, null, 2));
+    fs.writeFileSync(outFile, payloadStr);
     res.setHeader('Content-Disposition', 'attachment; filename="encrypted_data.json"');
     res.setHeader('Content-Type', 'application/json');
     return res.sendFile(outFile);
@@ -282,6 +295,8 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
     res.send(`Error encrypting. ${err.message} <a href='/encrypt'>Back</a>`);
   }
 });
+
+
 app.get('/decrypt', requireLogin, (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'decrypt.html'));
 });
@@ -346,5 +361,5 @@ app.post('/decrypt', requireLogin, upload.single('json_file'), async (req, res) 
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`70% Implementation server running on http://localhost:${PORT}`);
+  console.log(`server running on http://localhost:${PORT}`);
 });
