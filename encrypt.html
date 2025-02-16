@@ -1,34 +1,40 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <link rel="stylesheet" href="/style.css">
+  <meta charset="UTF-8">
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-
-<div class="navbar">
-  <a href="/" class="brand">QRLock</a>
-  <div class="nav-links">
-    <a href="/dashboard">Dashboard</a>
-    <a href="/logout">Logout</a>
-  </div>
-</div>
-
-<div class="container">
-  <h1>Encrypt File</h1>
-  <form method="POST" action="/encrypt" enctype="multipart/form-data">
-    <label>File to Encrypt:</label>
-    <input type="file" name="file_to_encrypt" required>
-
-    <label>6-Digit User IDs (comma-separated):</label>
-    <input type="text" name="six_digit_ids" placeholder="123456, 654321" required>
-
-    <label>Threshold (K):</label>
-    <input type="number" name="threshold" min="1" value="2">
-
-    <button type="submit">Encrypt & Download QR Code</button>
-  </form>
-</div>
-
+  <header>
+    <nav class="navbar">
+      <div class="container">
+        <a href="dashboard.html" class="nav-brand">QRLock</a>
+        <ul class="nav-menu">
+          <li><a href="dashboard.html">Dashboard</a></li>
+          <li><a href="encrypt.html">Encrypt</a></li>
+          <li><a href="decrypt.html">Decrypt</a></li>
+          <li><a href="/logout">Logout</a></li>
+        </ul>
+      </div>
+    </nav>
+  </header>
+  <main class="container form-container">
+    <h2>Encrypt a File</h2>
+    <form action="/encrypt" method="POST" enctype="multipart/form-data">
+      <div class="form-group">
+        <label>File to Encrypt:</label>
+        <input type="file" name="file_to_encrypt" required />
+      </div>
+      <div class="form-group">
+        <label>Select Recipients:</label>
+        {{userOptions}}
+      </div>
+      <div class="form-group">
+        <label>Threshold (min number of shares required):</label>
+        <input type="number" name="threshold" min="1" required />
+      </div>
+      <button type="submit" class="btn">Encrypt</button>
+    </form>
+  </main>
 </body>
 </html>
