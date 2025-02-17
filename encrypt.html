@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
@@ -26,8 +25,8 @@
         <input type="file" name="file_to_encrypt" required />
       </div>
       <div class="form-group">
-        <label>Select Recipients:</label>
-        {{userOptions}}
+        <label>Select Recipients (comma separated):</label>
+        <input type="text" name="recipients" placeholder="e.g., user1, user2" required />
       </div>
       <div class="form-group">
         <label>Threshold (min number of shares required):</label>

@@ -13,10 +13,8 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.static(path.join(__dirname, 'public')));
-
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
-
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 app.use(session({
@@ -24,29 +22,26 @@ app.use(session({
   resave: false,
   saveUninitialized: true
 }));
-
 const upload = multer({ dest: uploadsDir });
-
 const db = new sqlite3.Database('secure_file.db');
 db.serialize(() => {
   db.run(`CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT UNIQUE NOT NULL,
-        password_hash TEXT NOT NULL,
-        public_key_pem TEXT,
-        private_key_pem TEXT
-      )`);
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      username TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      public_key_pem TEXT,
+      private_key_pem TEXT
+    )`);
   db.run(`CREATE TABLE IF NOT EXISTS files (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        uploader_id INTEGER,
-        original_filename TEXT,
-        json_payload TEXT,
-        recipients TEXT,
-        threshold INTEGER,
-        file_id TEXT
-      )`);
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uploader_id INTEGER,
+      original_filename TEXT,
+      json_payload TEXT,
+      recipients TEXT,
+      threshold INTEGER,
+      file_id TEXT
+    )`);
 });
-
 function dbRun(sql, params = []) {
   return new Promise((resolve, reject) => {
     db.run(sql, params, function(err) {
@@ -71,7 +66,6 @@ function dbAll(sql, params = []) {
     });
   });
 }
-
 function generateRSAKeyPair(bits = 2048) {
   return new Promise((resolve, reject) => {
     forge.pki.rsa.generateKeyPair({ bits, workers: -1 }, (err, keypair) => {
@@ -82,7 +76,6 @@ function generateRSAKeyPair(bits = 2048) {
     });
   });
 }
-
 function hashPassword(password) {
   const salt = bcrypt.genSaltSync(10);
   return bcrypt.hashSync(password, salt);
@@ -90,7 +83,6 @@ function hashPassword(password) {
 function checkPassword(storedHash, candidate) {
   return bcrypt.compareSync(candidate, storedHash);
 }
-
 function aesEncrypt(dataBuf, keyBuf) {
   const iv = forge.random.getBytesSync(12);
   const cipher = forge.cipher.createCipher('AES-GCM', keyBuf.toString('binary'));
@@ -117,7 +109,6 @@ function aesDecrypt(ciphertextBuf, keyBuf, ivBuf, tagBuf) {
   const plain = decipher.output.getBytes();
   return Buffer.from(plain, 'binary');
 }
-
 function rsaEncrypt(publicKeyPem, dataBuf) {
   const pubKey = forge.pki.publicKeyFromPem(publicKeyPem);
   const encrypted = pubKey.encrypt(dataBuf.toString('binary'), 'RSA-OAEP', {
@@ -132,23 +123,19 @@ function rsaDecrypt(privateKeyPem, encBuf) {
   });
   return Buffer.from(decrypted, 'binary');
 }
-
 function splitSecret(keyHex, totalShares, threshold) {
   return secrets.share(keyHex, totalShares, threshold);
 }
 function recoverSecret(sharesArr) {
   return secrets.combine(sharesArr);
 }
-
 function requireLogin(req, res, next) {
   if (!req.session.userId) {
     return res.redirect('/login.html');
   }
   next();
 }
-
 const globalDecryptionPool = {};
-
 function serveTemplate(res, templatePath, replacements) {
   fs.readFile(templatePath, 'utf8', (err, data) => {
     if (err) return res.status(500).send("Error loading template.");
@@ -160,37 +147,34 @@ function serveTemplate(res, templatePath, replacements) {
     res.send(output);
   });
 }
-
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'home.html'));
 });
 app.get('/home.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'home.html'));
 });
-
 app.get('/register.html', (req, res) => {
-  res.sendFile(path.join(__dirname, 'views', 'register.html'));
+  serveTemplate(res, path.join(__dirname, 'views', 'register.html'), { error: "" });
 });
 app.post('/register', async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
-      return res.sendFile(path.join(__dirname, 'views', 'register.html'));
+      return serveTemplate(res, path.join(__dirname, 'views', 'register.html'), { error: "Username and password required." });
+    }
+    const existingUser = await dbGet(`SELECT * FROM users WHERE username = ?`, [username]);
+    if (existingUser) {
+      return serveTemplate(res, path.join(__dirname, 'views', 'register.html'), { error: "Username already exists. Please choose another." });
     }
     const { privateKeyPem, publicKeyPem } = await generateRSAKeyPair();
     const passHash = hashPassword(password);
-    await dbRun(
-      `INSERT INTO users (username, password_hash, public_key_pem, private_key_pem)
-       VALUES (?, ?, ?, ?)`,
-      [username, passHash, publicKeyPem, privateKeyPem]
-    );
+    await dbRun(`INSERT INTO users (username, password_hash, public_key_pem, private_key_pem) VALUES (?, ?, ?, ?)`, [username, passHash, publicKeyPem, privateKeyPem]);
     res.redirect('/login.html');
   } catch (err) {
     console.error(err);
-    res.sendFile(path.join(__dirname, 'views', 'register.html'));
+    serveTemplate(res, path.join(__dirname, 'views', 'register.html'), { error: "Registration error. Please try again." });
   }
 });
-
 app.get('/login.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'login.html'));
 });
@@ -208,13 +192,11 @@ app.post('/login', async (req, res) => {
     res.sendFile(path.join(__dirname, 'views', 'login.html'));
   }
 });
-
 app.get('/logout', (req, res) => {
   req.session.destroy(() => {
     res.redirect('/home.html');
   });
 });
-
 app.get('/dashboard.html', requireLogin, async (req, res) => {
   try {
     const user = await dbGet(`SELECT * FROM users WHERE id=?`, [req.session.userId]);
@@ -226,9 +208,10 @@ app.get('/dashboard.html', requireLogin, async (req, res) => {
       return recips.includes(user.username);
     }).forEach(f => {
       fileListHtml += `<div class="file-item">
-                <h4>${f.original_filename}</h4>
-                <a href="/decrypt/${f.file_id}" class="btn">Decrypt</a>
-            </div>`;
+        <h4>${f.original_filename}</h4>
+        <p>File ID: ${f.file_id}</p>
+        <a href="/decrypt/${f.file_id}" class="btn">Decrypt</a>
+      </div>`;
     });
     serveTemplate(res, path.join(__dirname, 'views', 'dashboard.html'), {
       username: user.username,
@@ -239,16 +222,15 @@ app.get('/dashboard.html', requireLogin, async (req, res) => {
     res.redirect('/logout');
   }
 });
-
 app.get('/encrypt.html', requireLogin, async (req, res) => {
   try {
     const users = await dbAll(`SELECT * FROM users WHERE id != ?`, [req.session.userId]);
     let userOptions = "";
     users.forEach(u => {
       userOptions += `<div class="checkbox-group">
-                <input type="checkbox" name="recipients" value="${u.username}" id="user-${u.id}" />
-                <label for="user-${u.id}">${u.username}</label>
-            </div>`;
+        <input type="checkbox" name="recipients" value="${u.username}" id="user-${u.id}" />
+        <label for="user-${u.id}">${u.username}</label>
+      </div>`;
     });
     serveTemplate(res, path.join(__dirname, 'views', 'encrypt.html'), {
       userOptions: userOptions
@@ -258,18 +240,18 @@ app.get('/encrypt.html', requireLogin, async (req, res) => {
     res.redirect('/dashboard.html');
   }
 });
-
 app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req, res) => {
   try {
     if (!req.file) {
       return res.send("No file uploaded. <a href='/encrypt.html'>Back</a>");
     }
-    let recipients = req.body.recipients;
-    if (!recipients) {
-      return res.send("No recipients selected. <a href='/encrypt.html'>Back</a>");
+    let recipientsInput = req.body.recipients;
+    if (!recipientsInput) {
+      return res.send("No recipients entered. <a href='/encrypt.html'>Back</a>");
     }
-    if (!Array.isArray(recipients)) {
-      recipients = [recipients];
+    let recipients = recipientsInput.split(',').map(r => r.trim()).filter(r => r !== "");
+    if (recipients.length === 0) {
+      return res.send("No valid recipients entered. <a href='/encrypt.html'>Back</a>");
     }
     const threshold = parseInt(req.body.threshold, 10);
     if (isNaN(threshold) || threshold < 1 || threshold > recipients.length) {
@@ -313,8 +295,7 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
     console.log(`Original file size: ${originalFileSize} bytes`);
     console.log(`Payload size: ${payloadSize} bytes`);
     console.log(`Overhead ratio: ${overheadRatio}%`);
-    await dbRun(
-      `INSERT INTO files (uploader_id, original_filename, json_payload, recipients, threshold, file_id)
+    await dbRun(`INSERT INTO files (uploader_id, original_filename, json_payload, recipients, threshold, file_id)
        VALUES (?, ?, ?, ?, ?, ?)`,
       [req.session.userId, req.file.originalname, payloadStr, JSON.stringify(recipients), threshold, file_id]
     );
@@ -326,7 +307,6 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
     res.send(`Error during encryption: ${err.message} <a href='/encrypt.html'>Back</a>`);
   }
 });
-
 app.get('/decrypt.html', requireLogin, async (req, res) => {
   try {
     const user = await dbGet(`SELECT * FROM users WHERE id=?`, [req.session.userId]);
@@ -339,6 +319,7 @@ app.get('/decrypt.html', requireLogin, async (req, res) => {
     }).forEach(f => {
       fileListHtml += `<div class="file-item">
           <h4>${f.original_filename}</h4>
+          <p>File ID: ${f.file_id}</p>
           <a href="/decrypt/${f.file_id}" class="btn">Decrypt</a>
       </div>`;
     });
@@ -350,7 +331,6 @@ app.get('/decrypt.html', requireLogin, async (req, res) => {
     res.redirect('/dashboard.html');
   }
 });
-
 app.get('/decrypt/:file_id', requireLogin, async (req, res) => {
   try {
     const file_id = req.params.file_id;
@@ -393,14 +373,13 @@ app.get('/decrypt/:file_id', requireLogin, async (req, res) => {
         return res.send(`Decrypt error: ${e.message} <a href='/decrypt.html'>Back</a>`);
       }
     } else {
-      return res.send(`Your share is accepted. We have ${shares.length} of ${payload.threshold} required shares. (Ask other authorized users to click "Decrypt" on this file.) <a href='/decrypt.html'>Back</a>`);
+      return res.send(`Your share is accepted. We have ${shares.length} of ${payload.threshold} required shares. (Ask other authorized users to click "Decrypt" for this file.) <a href='/decrypt.html'>Back</a>`);
     }
   } catch (err) {
     console.error(err);
     res.send(`Error in decryption: ${err.message} <a href='/decrypt.html'>Back</a>`);
   }
 });
-
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
