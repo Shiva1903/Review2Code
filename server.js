@@ -8,39 +8,21 @@ const bcrypt = require('bcryptjs');
 const sqlite3 = require('sqlite3').verbose();
 const forge = require('node-forge');
 const secrets = require('secrets.js');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 app.use(express.static(path.join(__dirname, 'public')));
 const uploadsDir = path.join(__dirname, 'uploads');
+const qrDir = path.join(__dirname, 'qrcodes');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir);
+if (!fs.existsSync(qrDir)) fs.mkdirSync(qrDir);
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-app.use(session({
-  secret: 'sessionSecret',
-  resave: false,
-  saveUninitialized: true
-}));
+app.use(session({ secret: 'sessionSecret', resave: false, saveUninitialized: true }));
 const upload = multer({ dest: uploadsDir });
 const db = new sqlite3.Database('secure_file.db');
 db.serialize(() => {
-  db.run(`CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      username TEXT UNIQUE NOT NULL,
-      password_hash TEXT NOT NULL,
-      public_key_pem TEXT,
-      private_key_pem TEXT
-    )`);
-  db.run(`CREATE TABLE IF NOT EXISTS files (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uploader_id INTEGER,
-      original_filename TEXT,
-      json_payload TEXT,
-      recipients TEXT,
-      threshold INTEGER,
-      file_id TEXT
-    )`);
+  db.run(`CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, public_key_pem TEXT, private_key_pem TEXT)`);
+  db.run(`CREATE TABLE IF NOT EXISTS files (id INTEGER PRIMARY KEY AUTOINCREMENT, uploader_id INTEGER, original_filename TEXT, payload_file_path TEXT, json_payload TEXT, recipients TEXT, threshold INTEGER, file_id TEXT)`);
 });
 function dbRun(sql, params = []) {
   return new Promise((resolve, reject) => {
@@ -91,18 +73,11 @@ function aesEncrypt(dataBuf, keyBuf) {
   cipher.finish();
   const ciphertext = cipher.output.getBytes();
   const tag = cipher.mode.tag.getBytes();
-  return {
-    ciphertext: Buffer.from(ciphertext, 'binary'),
-    iv: Buffer.from(iv, 'binary'),
-    tag: Buffer.from(tag, 'binary')
-  };
+  return { ciphertext: Buffer.from(ciphertext, 'binary'), iv: Buffer.from(iv, 'binary'), tag: Buffer.from(tag, 'binary') };
 }
 function aesDecrypt(ciphertextBuf, keyBuf, ivBuf, tagBuf) {
   const decipher = forge.cipher.createDecipher('AES-GCM', keyBuf.toString('binary'));
-  decipher.start({
-    iv: ivBuf.toString('binary'),
-    tag: forge.util.createBuffer(tagBuf.toString('binary'))
-  });
+  decipher.start({ iv: ivBuf.toString('binary'), tag: forge.util.createBuffer(tagBuf.toString('binary')) });
   decipher.update(forge.util.createBuffer(ciphertextBuf));
   const pass = decipher.finish();
   if (!pass) throw new Error("AES-GCM authentication failed");
@@ -111,16 +86,12 @@ function aesDecrypt(ciphertextBuf, keyBuf, ivBuf, tagBuf) {
 }
 function rsaEncrypt(publicKeyPem, dataBuf) {
   const pubKey = forge.pki.publicKeyFromPem(publicKeyPem);
-  const encrypted = pubKey.encrypt(dataBuf.toString('binary'), 'RSA-OAEP', {
-    md: forge.md.sha256.create()
-  });
+  const encrypted = pubKey.encrypt(dataBuf.toString('binary'), 'RSA-OAEP', { md: forge.md.sha256.create() });
   return Buffer.from(encrypted, 'binary');
 }
 function rsaDecrypt(privateKeyPem, encBuf) {
   const privKey = forge.pki.privateKeyFromPem(privateKeyPem);
-  const decrypted = privKey.decrypt(encBuf.toString('binary'), 'RSA-OAEP', {
-    md: forge.md.sha256.create()
-  });
+  const decrypted = privKey.decrypt(encBuf.toString('binary'), 'RSA-OAEP', { md: forge.md.sha256.create() });
   return Buffer.from(decrypted, 'binary');
 }
 function splitSecret(keyHex, totalShares, threshold) {
@@ -154,25 +125,22 @@ app.get('/home.html', (req, res) => {
   res.sendFile(path.join(__dirname, 'views', 'home.html'));
 });
 app.get('/register.html', (req, res) => {
-  serveTemplate(res, path.join(__dirname, 'views', 'register.html'), { error: "" });
+  res.sendFile(path.join(__dirname, 'views', 'register.html'));
 });
 app.post('/register', async (req, res) => {
   try {
     const { username, password } = req.body;
     if (!username || !password) {
-      return serveTemplate(res, path.join(__dirname, 'views', 'register.html'), { error: "Username and password required." });
-    }
-    const existingUser = await dbGet(`SELECT * FROM users WHERE username = ?`, [username]);
-    if (existingUser) {
-      return serveTemplate(res, path.join(__dirname, 'views', 'register.html'), { error: "Username already exists. Please choose another." });
+      return res.sendFile(path.join(__dirname, 'views', 'register.html'));
     }
     const { privateKeyPem, publicKeyPem } = await generateRSAKeyPair();
     const passHash = hashPassword(password);
-    await dbRun(`INSERT INTO users (username, password_hash, public_key_pem, private_key_pem) VALUES (?, ?, ?, ?)`, [username, passHash, publicKeyPem, privateKeyPem]);
+    await dbRun(`INSERT INTO users (username, password_hash, public_key_pem, private_key_pem) VALUES (?, ?, ?, ?)`,
+      [username, passHash, publicKeyPem, privateKeyPem]);
     res.redirect('/login.html');
   } catch (err) {
     console.error(err);
-    serveTemplate(res, path.join(__dirname, 'views', 'register.html'), { error: "Registration error. Please try again." });
+    res.sendFile(path.join(__dirname, 'views', 'register.html'));
   }
 });
 app.get('/login.html', (req, res) => {
@@ -207,11 +175,7 @@ app.get('/dashboard.html', requireLogin, async (req, res) => {
       const recips = JSON.parse(f.recipients);
       return recips.includes(user.username);
     }).forEach(f => {
-      fileListHtml += `<div class="file-item">
-        <h4>${f.original_filename}</h4>
-        <p>File ID: ${f.file_id}</p>
-        <a href="/decrypt/${f.file_id}" class="btn">Decrypt</a>
-      </div>`;
+      fileListHtml += `<div class="file-item"><h4>${f.original_filename}</h4><a href="/decrypt/${f.file_id}" class="btn">Decrypt</a></div>`;
     });
     serveTemplate(res, path.join(__dirname, 'views', 'dashboard.html'), {
       username: user.username,
@@ -222,23 +186,8 @@ app.get('/dashboard.html', requireLogin, async (req, res) => {
     res.redirect('/logout');
   }
 });
-app.get('/encrypt.html', requireLogin, async (req, res) => {
-  try {
-    const users = await dbAll(`SELECT * FROM users WHERE id != ?`, [req.session.userId]);
-    let userOptions = "";
-    users.forEach(u => {
-      userOptions += `<div class="checkbox-group">
-        <input type="checkbox" name="recipients" value="${u.username}" id="user-${u.id}" />
-        <label for="user-${u.id}">${u.username}</label>
-      </div>`;
-    });
-    serveTemplate(res, path.join(__dirname, 'views', 'encrypt.html'), {
-      userOptions: userOptions
-    });
-  } catch (err) {
-    console.error(err);
-    res.redirect('/dashboard.html');
-  }
+app.get('/encrypt.html', requireLogin, (req, res) => {
+  res.sendFile(path.join(__dirname, 'views', 'encrypt.html'));
 });
 app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req, res) => {
   try {
@@ -258,7 +207,6 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
       return res.send("Invalid threshold. <a href='/encrypt.html'>Back</a>");
     }
     const fileData = fs.readFileSync(req.file.path);
-    const originalFileSize = req.file.size;
     const aesKey = forge.random.getBytesSync(32);
     const aesKeyBuf = Buffer.from(aesKey, 'binary');
     const { ciphertext, iv, tag } = aesEncrypt(fileData, aesKeyBuf);
@@ -274,10 +222,7 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
       const shareStr = shares[i];
       const shareBuf = Buffer.from(shareStr, 'utf8');
       const encShareBuf = rsaEncrypt(user.public_key_pem, shareBuf);
-      encryptedShares.push({
-        username: recipUsername,
-        encrypted_share: encShareBuf.toString('base64')
-      });
+      encryptedShares.push({ username: recipUsername, encrypted_share: encShareBuf.toString('base64') });
     }
     const file_id = Date.now().toString() + Math.floor(Math.random() * 1000).toString();
     const payload = {
@@ -290,18 +235,13 @@ app.post('/encrypt', requireLogin, upload.single('file_to_encrypt'), async (req,
       file_id: file_id
     };
     const payloadStr = JSON.stringify(payload, null, 2);
-    const payloadSize = Buffer.byteLength(payloadStr, 'utf8');
-    const overheadRatio = (((payloadSize - originalFileSize) / originalFileSize) * 100).toFixed(2);
-    console.log(`Original file size: ${originalFileSize} bytes`);
-    console.log(`Payload size: ${payloadSize} bytes`);
-    console.log(`Overhead ratio: ${overheadRatio}%`);
-    await dbRun(`INSERT INTO files (uploader_id, original_filename, json_payload, recipients, threshold, file_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      [req.session.userId, req.file.originalname, payloadStr, JSON.stringify(recipients), threshold, file_id]
+    const payloadFilePath = path.join(uploadsDir, `encrypted_${file_id}.json`);
+    fs.writeFileSync(payloadFilePath, payloadStr);
+    await dbRun(`INSERT INTO files (uploader_id, original_filename, payload_file_path, json_payload, recipients, threshold, file_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [req.session.userId, req.file.originalname, payloadFilePath, payloadStr, JSON.stringify(recipients), threshold, file_id]
     );
-    serveTemplate(res, path.join(__dirname, 'views', 'encryptSuccess.html'), {
-      file_id: file_id
-    });
+    serveTemplate(res, path.join(__dirname, 'views', 'encryptSuccess.html'), { file_id: file_id });
   } catch (err) {
     console.error(err);
     res.send(`Error during encryption: ${err.message} <a href='/encrypt.html'>Back</a>`);
@@ -317,11 +257,7 @@ app.get('/decrypt.html', requireLogin, async (req, res) => {
       const recips = JSON.parse(f.recipients);
       return recips.includes(user.username);
     }).forEach(f => {
-      fileListHtml += `<div class="file-item">
-          <h4>${f.original_filename}</h4>
-          <p>File ID: ${f.file_id}</p>
-          <a href="/decrypt/${f.file_id}" class="btn">Decrypt</a>
-      </div>`;
+      fileListHtml += `<div class="file-item"><h4>${f.original_filename}</h4><a href="/decrypt/${f.file_id}" class="btn">Decrypt</a></div>`;
     });
     serveTemplate(res, path.join(__dirname, 'views', 'decrypt.html'), {
       fileList: fileListHtml || "<p>No files available for decryption.</p>"
@@ -336,7 +272,8 @@ app.get('/decrypt/:file_id', requireLogin, async (req, res) => {
     const file_id = req.params.file_id;
     const fileRecord = await dbGet(`SELECT * FROM files WHERE file_id=?`, [file_id]);
     if (!fileRecord) return res.send("File not found or already decrypted. <a href='/decrypt.html'>Back</a>");
-    const payload = JSON.parse(fileRecord.json_payload);
+    const payloadStr = fs.readFileSync(fileRecord.payload_file_path, 'utf8');
+    const payload = JSON.parse(payloadStr);
     const user = await dbGet(`SELECT * FROM users WHERE id=?`, [req.session.userId]);
     if (!user) return res.redirect('/logout');
     const myShareObj = payload.encrypted_shares.find(sh => sh.username === user.username);
@@ -366,6 +303,7 @@ app.get('/decrypt/:file_id', requireLogin, async (req, res) => {
         const plainBuf = aesDecrypt(ciphertextBuf, aesKeyBuf, ivBuf, tagBuf);
         delete globalDecryptionPool[file_id];
         await dbRun(`DELETE FROM files WHERE file_id=?`, [file_id]);
+        fs.unlinkSync(fileRecord.payload_file_path);
         res.setHeader('Content-Disposition', `attachment; filename="DECRYPTED_${payload.original_filename}"`);
         res.setHeader('Content-Type', 'application/octet-stream');
         return res.send(plainBuf);
